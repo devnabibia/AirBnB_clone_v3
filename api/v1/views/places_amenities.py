@@ -1,102 +1,74 @@
 #!/usr/bin/python3
-"""Handles all RESTful API actions for `place_amenity` relationship"""
-from flask import jsonify, abort
-
-from api.v1.views import app_views
+"""New view for the link between Place objects and Amenity objects"""
 from models.place import Place
-from models import storage
-from models import storage_t as storage_type
 from models.amenity import Amenity
+from api.v1.views import app_views
+from models import storage
+from os import getenv
+from flask import jsonify, abort
+from flasgger.utils import swag_from
+
+mode = getenv("HBNB_TYPE_STORAGE")
 
 
-@app_views.route("/places/<place_id>/amenities")
-def amenities_of_a_place(place_id):
-    """Retrieve all amenities of a place.
-
-    Args:
-        place_id (str): ID of the place to retrieve its amenities.
-
-    Returns:
-        list: All amenities of the place in JSON.
-
-    Raises:
-        404: If the specified place_id does not exist.
-    """
+@app_views.route("/places/<place_id>/amenities", methods=["GET"],
+                 strict_slashes=False)
+@swag_from('documentation/place_amenity/get_places_amenities.yml',
+           methods=['GET'])
+def amenities_from_place(place_id):
+    """Get all amenities of a place object"""
     place = storage.get(Place, place_id)
-    if not place:
+    if place is None:
         abort(404)
-    result = []
-
-    if storage_type == "db":
-        for amenity in place.amenities:
-            result.append(amenity.to_dict())
+    if mode == "db":
+        return jsonify([amenity.to_dict() for amenity in place.amenities])
     else:
-        result = place.amenities
-
-    return jsonify(result)
+        return jsonify([
+            storage.get(Amenity, _id).to_dict() for _id in place.amenity_ids
+        ])
 
 
 @app_views.route("/places/<place_id>/amenities/<amenity_id>",
-                 methods=["DELETE"])
-def unlink_amenity_from_a_place(place_id, amenity_id):
-    """Unlink amenity from a place.
-
-    Args:
-        place_id (str): ID of the place.
-        amenity_id (str): ID of the amenity.
-
-    Returns:
-        dict: An empty JSON.
-
-    Raises:
-        404: If the specified place_id or amenity_id does not exist or if the
-             amenity is not linked to the place before the request.
-    """
+                 methods=["DELETE"], strict_slashes=False)
+@swag_from('documentation/place_amenity/delete_place_amenities.yml',
+           methods=['DELETE'])
+def delete_amenity_from_place(place_id, amenity_id):
+    """Delete a Amenity object by its id from a Place object"""
     place = storage.get(Place, place_id)
     amenity = storage.get(Amenity, amenity_id)
-    if not place:
+    if place is None or amenity is None:
         abort(404)
-    if not amenity:
-        abort(404)
-    if amenity not in place.amenities:
-        abort(404)
-
-    if storage_type == "db":
-        place.amenities.remove(amenity)
+    if mode == "db":
+        if amenity not in place.amenities:
+            abort(404)
     else:
-        place.amenity_ids.remove(amenity)
+        if amenity.id not in place.amenity_id:
+            abort(404)
+    amenity.delete()
     storage.save()
 
     return jsonify({})
 
 
-@app_views.route("/places/<place_id>/amenities/<amenity_id>", methods=["POST"])
-def link_amenity_to_a_place(place_id, amenity_id):
-    """Link amenity to a place.
-
-    Args:
-        place_id (str): ID of the place.
-        amenity_id (str): ID of the amenity.
-
-    Returns:
-        dict: The amenity linked.
-
-    Raises:
-        404: If the specified place_id or amenity_id does not exist.
-    """
+@app_views.route("places/<place_id>/amenities/<amenity_id>", methods=["POST"],
+                 strict_slashes=False)
+@swag_from('documentation/place_amenity/post_place_amenities.yml',
+           methods=['POST'])
+def insert_amenity_in_place(place_id, amenity_id):
+    """Insert new amenity object into Place object"""
     place = storage.get(Place, place_id)
     amenity = storage.get(Amenity, amenity_id)
-    if not place:
+    if place is None or amenity is None:
         abort(404)
-    if not amenity:
-        abort(404)
-    if amenity in place.amenities:
-        return jsonify(amenity.to_dict())
-
-    if storage_type == "db":
-        place.amenities.append(amenity)
+    if mode == "db":
+        if amenity in place.amenities:
+            return jsonify(amenity.to_dict())
+        else:
+            place.amenities.append(amenity)
     else:
-        place.amenity_ids.append(amenity.id)
+        if amenity.id in place.amenity_id:
+            return jsonify(amenity.to_dict())
+        else:
+            place.amenity_id.append(amenity.id)
     storage.save()
-
     return jsonify(amenity.to_dict()), 201
